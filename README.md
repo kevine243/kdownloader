@@ -19,7 +19,9 @@ A modern **PyQt6** graphical user interface for the **yt-dlp** video & audio dow
 
 1. Install dependencies:
    ```bash
-   pip install PyQt6 yt-dlp psutil
+   pip install -r requirements.txt
+   # or using uv:
+   uv pip install -r requirements.txt
    ```
 
 2. Run the application:
