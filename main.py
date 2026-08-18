@@ -2,11 +2,24 @@ import sys
 import os
 import re
 import json
+import shutil
 import threading
 import subprocess
 import time
 import psutil
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+
+def get_ffmpeg_path():
+    try:
+        import imageio_ffmpeg
+        path = imageio_ffmpeg.get_ffmpeg_exe()
+        if path and os.path.exists(path):
+            return path
+    except Exception:
+        pass
+    return None
+
 
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QLineEdit, QPushButton, QLabel, QFileDialog, QRadioButton,
@@ -311,7 +324,7 @@ class KDownloader(QWidget):
         thread.start()
 
     def fetch_playlist_info(self, url):
-        cmd = ["yt-dlp", "--flat-playlist", "--dump-single-json", url]
+        cmd = ["yt-dlp", "--flat-playlist", "--dump-single-json", "--extractor-args", "youtube:player_client=android", url]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
@@ -347,7 +360,7 @@ class KDownloader(QWidget):
         thread.start()
 
     def fetch_chapters_info(self, url):
-        cmd = ["yt-dlp", "--no-playlist", "--dump-json", url]
+        cmd = ["yt-dlp", "--no-playlist", "--dump-json", "--extractor-args", "youtube:player_client=android", url]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
@@ -440,7 +453,15 @@ class KDownloader(QWidget):
             "--progress",
             "--progress-template", progress_template,
             "--paths", self.download_path,
+            "--extractor-args", "youtube:player_client=android",
         ]
+
+        if shutil.which("node"):
+            cmd += ["--js-runtimes", "node"]
+
+        ffmpeg_path = get_ffmpeg_path()
+        if ffmpeg_path:
+            cmd += ["--ffmpeg-location", ffmpeg_path]
 
         if split_chapters:
             parsed = urlparse(url)
@@ -471,7 +492,7 @@ class KDownloader(QWidget):
 
         try:
             self.download_process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
             )
 
             while True:
@@ -536,7 +557,14 @@ class KDownloader(QWidget):
                 self.communicate.file_info_signal.emit(info)
             return
 
-        if "[download]" in line or "[ExtractAudio]" in line or "[Merger]" in line:
+        if (
+            "ERROR:" in line
+            or "WARNING:" in line
+            or "[download]" in line
+            or "[ExtractAudio]" in line
+            or "[Merger]" in line
+            or "[info]" in line
+        ):
             self.communicate.update_signal.emit(line)
 
     def update_output(self, message):
