@@ -311,14 +311,26 @@ class KDownloader(QWidget):
         thread.start()
 
     def fetch_playlist_info(self, url):
-        cmd = ["yt-dlp", "--flat-playlist", "--print", "title", url]
+        cmd = ["yt-dlp", "--flat-playlist", "--dump-single-json", url]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            if result.stdout.strip():
-                self.communicate.update_signal.emit("✅ Ce lien est une playlist.")
+            data = json.loads(result.stdout)
+            _type = data.get("_type")
+            entries = data.get("entries")
+
+            if _type in ("playlist", "multi_video") or isinstance(entries, list):
+                title = data.get("title", "Sans titre")
+                count = len(entries) if entries is not None else data.get("playlist_count", 0)
+                msg = f"✅ Ce lien est une playlist.\n📌 Titre : {title}"
+                if count:
+                    msg += f"\n🔢 Nombre d'éléments : {count}"
+                self.communicate.update_signal.emit(msg)
             else:
-                self.communicate.update_signal.emit("ℹ️ Ce lien ne semble pas être une playlist.")
-        except subprocess.CalledProcessError:
+                title = data.get("title", "Sans titre")
+                self.communicate.update_signal.emit(
+                    f"ℹ️ Ce lien n'est pas une playlist (vidéo individuelle).\n📌 Titre : {title}"
+                )
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
             self.communicate.update_signal.emit("❌ Erreur: Impossible de vérifier la playlist.")
 
     def check_chapters(self):
@@ -342,7 +354,7 @@ class KDownloader(QWidget):
             chapters = data.get("chapters", [])
             if chapters:
                 message = "✅ Chapitres disponibles:\n"
-                total_duration = chapters[-1].get("end_time", chapters[-1].get("start_time", 0))
+                total_duration = data.get("duration") or (chapters[-1].get("end_time", chapters[-1].get("start_time", 0)) if chapters else 0)
 
                 for i, chapter in enumerate(chapters, start=1):
                     start_time = chapter.get("start_time", 0)
@@ -359,7 +371,7 @@ class KDownloader(QWidget):
                     else:
                         end_time = total_duration
 
-                    duration = end_time - start_time
+                    duration = max(0, end_time - start_time)
                     dur_minutes = int(duration) // 60
                     dur_seconds = int(duration) % 60
                     formatted_duration = f"{dur_minutes:02d}:{dur_seconds:02d}"
