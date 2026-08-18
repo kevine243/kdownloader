@@ -379,6 +379,11 @@ class KDownloader(QWidget):
 
     def parse_available_qualities(self, data):
         formats = data.get("formats", [])
+
+        # Estimation de la taille audio maximale
+        audio_formats = [f for f in formats if f.get("vcodec") == "none" and (f.get("filesize") or f.get("filesize_approx"))]
+        best_audio_size = max([(f.get("filesize") or f.get("filesize_approx")) for f in audio_formats], default=0)
+
         heights = sorted(list(set(f.get("height") for f in formats if f.get("height") and f.get("height") >= 144)), reverse=True)
 
         height_labels = {
@@ -392,13 +397,37 @@ class KDownloader(QWidget):
             144: "144p",
         }
 
-        qualities = ["Meilleure qualité"]
+        def format_bytes(b):
+            if not b or b <= 0:
+                return ""
+            if b < 1024 * 1024:
+                return f" (~{b / 1024:.1f} KB)"
+            elif b < 1024 * 1024 * 1024:
+                return f" (~{b / (1024 * 1024):.1f} MB)"
+            else:
+                return f" (~{b / (1024 * 1024 * 1024):.2f} GB)"
+
+        max_size_str = ""
+        if heights:
+            max_h = heights[0]
+            v_formats = [f for f in formats if f.get("height") == max_h and f.get("vcodec") != "none"]
+            best_v_size = max([(f.get("filesize") or f.get("filesize_approx") or 0) for f in v_formats], default=0)
+            if best_v_size > 0:
+                max_size_str = format_bytes(best_v_size + best_audio_size)
+
+        qualities = [f"Meilleure qualité{max_size_str}"]
         available_names = []
         for h in heights:
-            name = height_labels.get(h, f"{h}p")
-            if name not in qualities:
-                qualities.append(name)
-                available_names.append(name)
+            label = height_labels.get(h, f"{h}p")
+            v_formats = [f for f in formats if f.get("height") == h and f.get("vcodec") != "none"]
+            best_v_size = max([(f.get("filesize") or f.get("filesize_approx") or 0) for f in v_formats], default=0)
+            size_str = format_bytes(best_v_size + best_audio_size) if best_v_size > 0 else ""
+
+            full_name = f"{label}{size_str}"
+            if full_name not in qualities:
+                qualities.append(full_name)
+                available_names.append(full_name)
+
         return qualities, available_names
 
     def fetch_qualities_info(self, url):
@@ -517,8 +546,8 @@ class KDownloader(QWidget):
         split_chapters = self.split_chapters_checkbox.isChecked()
 
         target_height = None
-        if quality != "Meilleure qualité":
-            match = re.search(r'(\d+)', quality)
+        if "Meilleure" not in quality:
+            match = re.search(r'(\d+)p', quality)
             if match:
                 target_height = int(match.group(1))
 
