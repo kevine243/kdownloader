@@ -25,8 +25,8 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QG
                              QLineEdit, QPushButton, QLabel, QFileDialog, QRadioButton,
                              QComboBox, QCheckBox, QMessageBox, QTextEdit, QProgressBar,
                              QGroupBox)
-from PyQt6.QtCore import pyqtSignal, QObject, QSettings, Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import pyqtSignal, QObject, QSettings, Qt, QUrl
+from PyQt6.QtGui import QIcon, QDesktopServices
 
 
 class Communicate(QObject):
@@ -194,6 +194,10 @@ class KDownloader(QWidget):
         self.select_folder_btn.clicked.connect(self.select_folder)
         folder_layout.addWidget(self.select_folder_btn)
 
+        self.open_folder_btn = QPushButton("Ouvrir le dossier", self)
+        self.open_folder_btn.clicked.connect(self.open_folder)
+        folder_layout.addWidget(self.open_folder_btn)
+
         source_layout.addLayout(folder_layout)
         source_group.setLayout(source_layout)
         main_layout.addWidget(source_group)
@@ -290,6 +294,12 @@ class KDownloader(QWidget):
             self.download_path = folder
             self.destination_label.setText(f"Dossier: {folder}")
             self.settings.setValue("download_path", folder)
+
+    def open_folder(self):
+        if not self.download_path or not os.path.exists(self.download_path):
+            QMessageBox.warning(self, "Erreur", "Veuillez d'abord choisir un dossier valide.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.download_path))
 
     def set_ui_downloading(self, is_downloading: bool):
         self.downloading = is_downloading
