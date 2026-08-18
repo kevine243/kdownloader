@@ -21,12 +21,22 @@ def get_ffmpeg_path():
     return None
 
 
+def get_base_yt_dlp_cmd():
+    cmd = ["yt-dlp", "--extractor-args", "youtube:player_client=web_embedded,android_vr,mweb,web"]
+    if shutil.which("node"):
+        cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
+    ffmpeg_path = get_ffmpeg_path()
+    if ffmpeg_path:
+        cmd += ["--ffmpeg-location", ffmpeg_path]
+    return cmd
+
+
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QLineEdit, QPushButton, QLabel, QFileDialog, QRadioButton,
                              QComboBox, QCheckBox, QMessageBox, QTextEdit, QProgressBar,
                              QGroupBox)
 from PyQt6.QtCore import pyqtSignal, QObject, QSettings, Qt, QUrl
-from PyQt6.QtGui import QIcon, QDesktopServices
+from PyQt6.QtGui import QIcon, QDesktopServices, QFont
 
 
 class Communicate(QObject):
@@ -81,7 +91,7 @@ class KDownloader(QWidget):
                 background-color: #1e1e2e;
                 color: #cdd6f4;
                 font-family: 'Segoe UI', Arial, sans-serif;
-                font-size: 13px;
+                font-size: 10pt;
             }
             QGroupBox {
                 border: 1px solid #45475a;
@@ -349,10 +359,7 @@ class KDownloader(QWidget):
         thread.start()
 
     def fetch_playlist_info(self, url):
-        cmd = ["yt-dlp", "--flat-playlist", "--dump-single-json"]
-        if shutil.which("node"):
-            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
-        cmd.append(url)
+        cmd = get_base_yt_dlp_cmd() + ["--flat-playlist", "--dump-single-json", url]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
@@ -441,10 +448,7 @@ class KDownloader(QWidget):
         return qualities, available_names
 
     def fetch_qualities_info(self, url):
-        cmd = ["yt-dlp", "--no-playlist", "--dump-json"]
-        if shutil.which("node"):
-            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
-        cmd.append(url)
+        cmd = get_base_yt_dlp_cmd() + ["--no-playlist", "--dump-json", url]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
@@ -473,10 +477,7 @@ class KDownloader(QWidget):
         thread.start()
 
     def fetch_chapters_info(self, url):
-        cmd = ["yt-dlp", "--no-playlist", "--dump-json"]
-        if shutil.which("node"):
-            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
-        cmd.append(url)
+        cmd = get_base_yt_dlp_cmd() + ["--no-playlist", "--dump-json", url]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
@@ -563,23 +564,14 @@ class KDownloader(QWidget):
 
         progress_template = "KPARSER|%(progress.status)s|%(progress._percent_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s|%(progress._speed_str)s|%(progress._eta_str)s"
 
-        cmd = [
-            "yt-dlp",
+        cmd = get_base_yt_dlp_cmd() + [
             "--newline",
             "--progress",
             "--progress-template", progress_template,
             "--paths", self.download_path,
-            "--no-continue",
             "--retries", "10",
             "--fragment-retries", "10",
         ]
-
-        if shutil.which("node"):
-            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
-
-        ffmpeg_path = get_ffmpeg_path()
-        if ffmpeg_path:
-            cmd += ["--ffmpeg-location", ffmpeg_path]
 
         if split_chapters:
             parsed = urlparse(url)
@@ -641,12 +633,20 @@ class KDownloader(QWidget):
                 try:
                     parent = psutil.Process(self.download_process.pid)
                     for child in parent.children(recursive=True):
-                        child.terminate()
+                        try:
+                            child.terminate()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     gone, still_alive = psutil.wait_procs(parent.children(), timeout=3)
                     for child in still_alive:
-                        child.kill()
+                        try:
+                            child.kill()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                     self.download_process.terminate()
                     self.download_process.wait(timeout=3)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
                 except Exception as e:
                     print(f"Erreur lors de l'arrêt du processus: {e}")
 
@@ -697,6 +697,7 @@ class KDownloader(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setFont(QFont("Segoe UI", 10))
     ex = KDownloader()
     ex.show()
     sys.exit(app.exec())
