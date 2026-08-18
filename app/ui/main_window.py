@@ -15,6 +15,7 @@ from app.core.downloader import DownloadProcess, DownloadOptions
 from app.core.parser import ProgressData
 from app.core.utils import format_duration, format_bytes_human
 from app.ui.components.sidebar import Sidebar
+from app.ui.components.chapter_dialog import ChapterDialog
 from app.ui.views.download_view import DownloadView
 from app.ui.views.history_view import HistoryView
 from app.ui.views.log_view import LogView
@@ -28,6 +29,7 @@ class Communicate(QObject):
     finished_file_signal = pyqtSignal(str)
     metadata_signal = pyqtSignal(object)  # MediaMetadata
     qualities_signal = pyqtSignal(list)
+    chapters_signal = pyqtSignal(list, str, int)  # chapters, title, total_duration
 
 
 class MainWindow(QWidget):
@@ -54,6 +56,7 @@ class MainWindow(QWidget):
         self.communicate.finished_file_signal.connect(self._on_download_finished)
         self.communicate.metadata_signal.connect(self._on_metadata_received)
         self.communicate.qualities_signal.connect(self._on_qualities_received)
+        self.communicate.chapters_signal.connect(self._on_chapters_received)
 
     def _init_ui(self):
         self.setWindowTitle("KDownloader Pro")
@@ -217,20 +220,35 @@ class MainWindow(QWidget):
         def _worker():
             try:
                 chapters, qualities, total_duration = fetch_chapters_info(url)
+                title = self.download_view.media_card.title_label.text()
                 if qualities:
                     self.communicate.qualities_signal.emit(qualities)
                 if chapters:
-                    msg = "✅ Chapitres détectés :\n"
+                    msg = f"✅ {len(chapters)} chapitres détectés :\n"
                     for i, ch in enumerate(chapters, 1):
                         start = format_duration(ch.get("start_time", 0))
                         msg += f"{i:02d}. {ch.get('title', 'Sans titre')} ({start})\n"
                     self.communicate.log_signal.emit(msg)
                 else:
                     self.communicate.log_signal.emit("ℹ️ Aucun chapitre détecté.")
+                self.communicate.chapters_signal.emit(chapters, title, total_duration)
             except Exception as e:
                 self.communicate.log_signal.emit(f"❌ Erreur chapitres : {str(e)}")
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_chapters_received(self, chapters: list, title: str, total_duration: int):
+        if not chapters:
+            QMessageBox.information(self, "Chapitres", "Aucun chapitre n'a été détecté dans cette vidéo.")
+            return
+        
+        dialog = ChapterDialog(chapters, title=title, total_duration=total_duration, parent=self)
+        dialog.download_split_requested.connect(self._on_split_download_from_dialog)
+        dialog.exec()
+
+    def _on_split_download_from_dialog(self):
+        self.download_view.format_selector.split_chapters_checkbox.setChecked(True)
+        self.start_download()
 
     # --- Folder Actions ---
     def select_download_folder(self):

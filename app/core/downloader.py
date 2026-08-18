@@ -80,8 +80,9 @@ class DownloadProcess:
             cmd += [
                 "--no-playlist",
                 "--split-chapters",
+                "--force-keyframes-at-cuts",
                 "-o", "%(title)s.%(ext)s",
-                "-o", "chapter:%(title)s/%(chapter_number)03d - %(chapter)s.%(ext)s"
+                "-o", "chapter:%(title)s/%(chapter_number)02d - %(chapter)s.%(ext)s"
             ]
         else:
             cmd += ["-o", "%(title)s.%(ext)s"]
@@ -122,6 +123,7 @@ class DownloadProcess:
         cmd = self.build_command()
         self.cancelled = False
         self.detected_filepath = None
+        main_video_file = None
 
         try:
             self.process = subprocess.Popen(
@@ -143,7 +145,13 @@ class DownloadProcess:
                     progress_data, file_from_line = parse_progress_line(stripped)
 
                     if file_from_line:
-                        self.detected_filepath = file_from_line
+                        if "[SplitChapters]" in stripped:
+                            self.detected_filepath = file_from_line
+                        else:
+                            if not self.detected_filepath:
+                                self.detected_filepath = file_from_line
+                            main_video_file = file_from_line
+
                         if on_file_found:
                             on_file_found(file_from_line)
 
@@ -157,6 +165,7 @@ class DownloadProcess:
                             or "[download]" in stripped
                             or "[ExtractAudio]" in stripped
                             or "[Merger]" in stripped
+                            or "[SplitChapters]" in stripped
                             or "[info]" in stripped
                         ):
                             on_log(stripped)
@@ -165,6 +174,25 @@ class DownloadProcess:
             return_code = self.process.returncode
 
             if return_code == 0:
+                if self.options.split_chapters:
+                    # If split chapters was requested, check for chapter folder or subfiles
+                    if self.detected_filepath and os.path.exists(self.detected_filepath):
+                        parent = os.path.dirname(self.detected_filepath)
+                        # If parent is a subfolder inside download_path
+                        if os.path.abspath(parent) != os.path.abspath(self.options.download_path) and os.path.isdir(parent):
+                            self.detected_filepath = parent
+                    
+                    # Clean up the intermediate combined full video/audio if chapter split succeeded
+                    if main_video_file and os.path.exists(main_video_file) and os.path.isfile(main_video_file):
+                        # Ensure we don't delete if it's the only thing downloaded
+                        if self.detected_filepath and self.detected_filepath != main_video_file and os.path.exists(self.detected_filepath):
+                            try:
+                                os.remove(main_video_file)
+                                if on_log:
+                                    on_log(f"🧹 Nettoyage du fichier complet temporaire: {os.path.basename(main_video_file)}")
+                            except Exception:
+                                pass
+
                 if not self.detected_filepath or not os.path.exists(self.detected_filepath):
                     self.detected_filepath = find_latest_file_in_dir(self.options.download_path)
                 return True

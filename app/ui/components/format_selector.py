@@ -147,9 +147,21 @@ class FormatSelector(QFrame):
         a_checks_layout = QHBoxLayout()
         self.embed_metadata_checkbox = QCheckBox("Pochette d'album & Métadonnées ID3", self)
         self.embed_metadata_checkbox.setChecked(True)
+        self.split_chapters_audio_checkbox = QCheckBox("Découper en chapitres (pistes)", self)
         a_checks_layout.addWidget(self.embed_metadata_checkbox)
+        a_checks_layout.addWidget(self.split_chapters_audio_checkbox)
         a_checks_layout.addStretch()
         audio_layout.addLayout(a_checks_layout)
+
+        # Synchronize split checkboxes between video and audio
+        self.split_chapters_checkbox.toggled.connect(
+            lambda checked: self.split_chapters_audio_checkbox.setChecked(checked)
+            if self.split_chapters_audio_checkbox.isChecked() != checked else None
+        )
+        self.split_chapters_audio_checkbox.toggled.connect(
+            lambda checked: self.split_chapters_checkbox.setChecked(checked)
+            if self.split_chapters_checkbox.isChecked() != checked else None
+        )
 
         main_layout.addWidget(self.audio_container)
         self.audio_container.hide()
@@ -206,6 +218,7 @@ class FormatSelector(QFrame):
         self.quality_select.setEnabled(enabled)
         self.subtitles_checkbox.setEnabled(enabled)
         self.split_chapters_checkbox.setEnabled(enabled)
+        self.split_chapters_audio_checkbox.setEnabled(enabled)
         self.audio_format_select.setEnabled(enabled)
         self.audio_bitrate_select.setEnabled(enabled)
         self.embed_metadata_checkbox.setEnabled(enabled)

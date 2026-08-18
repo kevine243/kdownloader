@@ -58,6 +58,8 @@ def parse_progress_line(line: str) -> tuple[ProgressData | None, str | None]:
     # Check standard yt-dlp outputs for target filepath
     if "[download] Destination:" in line:
         detected_file = line.replace("[download] Destination:", "").strip()
+    elif "[SplitChapters] Destination:" in line:
+        detected_file = line.replace("[SplitChapters] Destination:", "").strip()
     elif "[Merger] Merging formats into" in line:
         m = re.search(r'Merging formats into "([^"]+)"', line)
         if m:
