@@ -324,7 +324,10 @@ class KDownloader(QWidget):
         thread.start()
 
     def fetch_playlist_info(self, url):
-        cmd = ["yt-dlp", "--flat-playlist", "--dump-single-json", "--extractor-args", "youtube:player_client=android", url]
+        cmd = ["yt-dlp", "--flat-playlist", "--dump-single-json"]
+        if shutil.which("node"):
+            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
+        cmd.append(url)
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
@@ -360,7 +363,10 @@ class KDownloader(QWidget):
         thread.start()
 
     def fetch_chapters_info(self, url):
-        cmd = ["yt-dlp", "--no-playlist", "--dump-json", "--extractor-args", "youtube:player_client=android", url]
+        cmd = ["yt-dlp", "--no-playlist", "--dump-json"]
+        if shutil.which("node"):
+            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
+        cmd.append(url)
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
@@ -453,11 +459,10 @@ class KDownloader(QWidget):
             "--progress",
             "--progress-template", progress_template,
             "--paths", self.download_path,
-            "--extractor-args", "youtube:player_client=android",
         ]
 
         if shutil.which("node"):
-            cmd += ["--js-runtimes", "node"]
+            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
 
         ffmpeg_path = get_ffmpeg_path()
         if ffmpeg_path:
