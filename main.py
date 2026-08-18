@@ -34,6 +34,7 @@ class Communicate(QObject):
     progress_signal = pyqtSignal(int)
     file_info_signal = pyqtSignal(str)
     download_state_signal = pyqtSignal(bool)
+    qualities_signal = pyqtSignal(list)
 
 
 class KDownloader(QWidget):
@@ -44,6 +45,7 @@ class KDownloader(QWidget):
         self.communicate.progress_signal.connect(self.update_progress)
         self.communicate.file_info_signal.connect(self.update_file_info)
         self.communicate.download_state_signal.connect(self.set_ui_downloading)
+        self.communicate.qualities_signal.connect(self.update_qualities)
 
         self.downloading = False
         self.download_path = ""
@@ -225,7 +227,7 @@ class KDownloader(QWidget):
         self.split_chapters_checkbox = QCheckBox("Découper en chapitres", self)
         options_layout.addWidget(self.split_chapters_checkbox, 2, 0, 1, 2)
 
-        # Boutons d'inspection (Playlist / Chapitres)
+        # Boutons d'inspection (Playlist / Chapitres / Qualités)
         inspect_layout = QHBoxLayout()
         self.check_playlist_btn = QPushButton("Vérifier la playlist", self)
         self.check_playlist_btn.clicked.connect(self.check_playlist)
@@ -234,6 +236,10 @@ class KDownloader(QWidget):
         self.check_chapters_btn = QPushButton("Vérifier les chapitres", self)
         self.check_chapters_btn.clicked.connect(self.check_chapters)
         inspect_layout.addWidget(self.check_chapters_btn)
+
+        self.check_qualities_btn = QPushButton("Analyser les qualités", self)
+        self.check_qualities_btn.clicked.connect(self.check_qualities)
+        inspect_layout.addWidget(self.check_qualities_btn)
 
         options_layout.addLayout(inspect_layout, 3, 0, 1, 2)
 
@@ -291,12 +297,21 @@ class KDownloader(QWidget):
         self.select_folder_btn.setEnabled(not is_downloading)
         self.check_playlist_btn.setEnabled(not is_downloading)
         self.check_chapters_btn.setEnabled(not is_downloading)
+        self.check_qualities_btn.setEnabled(not is_downloading)
         self.video_radio.setEnabled(not is_downloading)
         self.audio_radio.setEnabled(not is_downloading)
         self.quality_select.setEnabled(not is_downloading)
         self.split_chapters_checkbox.setEnabled(not is_downloading)
         self.download_btn.setEnabled(not is_downloading)
         self.cancel_btn.setEnabled(is_downloading)
+
+    def update_qualities(self, qualities_list):
+        current = self.quality_select.currentText()
+        self.quality_select.clear()
+        self.quality_select.addItems(qualities_list)
+        index = self.quality_select.findText(current)
+        if index >= 0:
+            self.quality_select.setCurrentIndex(index)
 
     def check_yt_dlp(self) -> bool:
         try:
@@ -349,6 +364,62 @@ class KDownloader(QWidget):
         except (subprocess.CalledProcessError, json.JSONDecodeError):
             self.communicate.update_signal.emit("❌ Erreur: Impossible de vérifier la playlist.")
 
+    def check_qualities(self):
+        url = self.url_input.text().strip()
+        if not url:
+            QMessageBox.warning(self, "Erreur", "Veuillez entrer une URL valide.")
+            return
+
+        if not self.check_yt_dlp():
+            return
+
+        self.communicate.update_signal.emit("⏳ Analyse des qualités disponibles en cours...")
+        thread = threading.Thread(target=self.fetch_qualities_info, args=(url,), daemon=True)
+        thread.start()
+
+    def parse_available_qualities(self, data):
+        formats = data.get("formats", [])
+        heights = sorted(list(set(f.get("height") for f in formats if f.get("height") and f.get("height") >= 144)), reverse=True)
+
+        height_labels = {
+            2160: "4K (2160p)",
+            1440: "2K (1440p)",
+            1080: "1080p",
+            720: "720p",
+            480: "480p",
+            360: "360p",
+            240: "240p",
+            144: "144p",
+        }
+
+        qualities = ["Meilleure qualité"]
+        available_names = []
+        for h in heights:
+            name = height_labels.get(h, f"{h}p")
+            if name not in qualities:
+                qualities.append(name)
+                available_names.append(name)
+        return qualities, available_names
+
+    def fetch_qualities_info(self, url):
+        cmd = ["yt-dlp", "--no-playlist", "--dump-json"]
+        if shutil.which("node"):
+            cmd += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
+        cmd.append(url)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            data = json.loads(result.stdout)
+            qualities, available_names = self.parse_available_qualities(data)
+            self.communicate.qualities_signal.emit(qualities)
+
+            if available_names:
+                msg = f"✅ Qualités disponibles pour cette vidéo :\n" + ", ".join(available_names)
+            else:
+                msg = "ℹ️ Impossible de trouver les résolutions détaillées."
+            self.communicate.update_signal.emit(msg)
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            self.communicate.update_signal.emit("❌ Erreur: Impossible de vérifier les qualités.")
+
     def check_chapters(self):
         url = self.url_input.text().strip()
         if not url:
@@ -370,6 +441,11 @@ class KDownloader(QWidget):
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout)
+
+            # Extraire également les qualités disponibles
+            qualities, _ = self.parse_available_qualities(data)
+            self.communicate.qualities_signal.emit(qualities)
+
             chapters = data.get("chapters", [])
             if chapters:
                 message = "✅ Chapitres disponibles:\n"
@@ -440,16 +516,11 @@ class KDownloader(QWidget):
         quality = self.quality_select.currentText()
         split_chapters = self.split_chapters_checkbox.isChecked()
 
-        quality_map = {
-            "Meilleure qualité": None,
-            "4K": 2160,
-            "2K": 1440,
-            "1440p": 1440,
-            "1080p": 1080,
-            "720p": 720,
-            "480p": 480,
-            "360p": 360,
-        }
+        target_height = None
+        if quality != "Meilleure qualité":
+            match = re.search(r'(\d+)', quality)
+            if match:
+                target_height = int(match.group(1))
 
         progress_template = "KPARSER|%(progress.status)s|%(progress._percent_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s|%(progress._speed_str)s|%(progress._eta_str)s"
 
@@ -459,6 +530,9 @@ class KDownloader(QWidget):
             "--progress",
             "--progress-template", progress_template,
             "--paths", self.download_path,
+            "--no-continue",
+            "--retries", "10",
+            "--fragment-retries", "10",
         ]
 
         if shutil.which("node"):
@@ -488,8 +562,8 @@ class KDownloader(QWidget):
         if is_audio:
             cmd += ["-x", "--audio-format", "mp3", "--audio-quality", "0"]
         else:
-            if quality_map.get(quality) is not None:
-                cmd += ["-f", f"bestvideo[height<={quality_map[quality]}]+bestaudio/best"]
+            if target_height is not None:
+                cmd += ["-f", f"bestvideo[height<={target_height}]+bestaudio/best"]
             else:
                 cmd += ["-f", "bestvideo+bestaudio/best"]
 
